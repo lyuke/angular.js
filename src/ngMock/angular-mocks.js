@@ -106,19 +106,29 @@ angular.mock.$Browser = function() {
    * @param {number=} number of milliseconds to flush. See {@link #defer.now}
    */
   self.defer.flush = function(delay) {
+    var nextTime;
+
     if (angular.isDefined(delay)) {
-      self.defer.now += delay;
+      // A delay was passed so compute the next time
+      nextTime = self.defer.now + delay;
     } else {
       if (self.deferredFns.length) {
-        self.defer.now = self.deferredFns[self.deferredFns.length - 1].time;
+        // No delay was passed so set the next time so that it clears the deferred queue
+        nextTime = self.deferredFns[self.deferredFns.length - 1].time;
       } else {
+        // No delay passed, but there are no deferred tasks so flush - indicates an error!
         throw new Error('No deferred tasks to be flushed');
       }
     }
 
-    while (self.deferredFns.length && self.deferredFns[0].time <= self.defer.now) {
+    while (self.deferredFns.length && self.deferredFns[0].time <= nextTime) {
+      // Increment the time and call the next deferred function
+      self.defer.now = self.deferredFns[0].time;
       self.deferredFns.shift().fn();
     }
+
+    // Ensure that the current time is correct
+    self.defer.now = nextTime;
   };
 
   self.$$baseHref = '/';
@@ -220,13 +230,13 @@ angular.mock.$ExceptionHandlerProvider = function() {
    * @param {string} mode Mode of operation, defaults to `rethrow`.
    *
    *   - `log`: Sometimes it is desirable to test that an error is thrown, for this case the `log`
-   *            mode stores an array of errors in `$exceptionHandler.errors`, to allow later
-   *            assertion of them. See {@link ngMock.$log#assertEmpty assertEmpty()} and
-   *            {@link ngMock.$log#reset reset()}
+   *     mode stores an array of errors in `$exceptionHandler.errors`, to allow later assertion of
+   *     them. See {@link ngMock.$log#assertEmpty assertEmpty()} and
+   *     {@link ngMock.$log#reset reset()}.
    *   - `rethrow`: If any errors are passed to the handler in tests, it typically means that there
-   *                is a bug in the application or test, so this mock will make these tests fail.
-   *                For any implementations that expect exceptions to be thrown, the `rethrow` mode
-   *                will also maintain a log of thrown errors.
+   *     is a bug in the application or test, so this mock will make these tests fail. For any
+   *     implementations that expect exceptions to be thrown, the `rethrow` mode will also maintain
+   *     a log of thrown errors in `$exceptionHandler.errors`.
    */
   this.mode = function(mode) {
 
@@ -761,6 +771,8 @@ angular.mock.TzDate.prototype = Date.prototype;
  * @description
  * Mock implementation of the {@link ng.$animate `$animate`} service. Exposes two additional methods
  * for testing animations.
+ *
+ * You need to require the `ngAnimateMock` module in your test suite for instance `beforeEach(module('ngAnimateMock'))`
  */
 angular.mock.animate = angular.module('ngAnimateMock', ['ng'])
 
@@ -1872,6 +1884,15 @@ function createHttpBackendMock($rootScope, $timeout, $delegate, $browser) {
 
 function MockHttpExpectation(method, url, data, headers, keys) {
 
+  function getUrlParams(u) {
+    var params = u.slice(u.indexOf('?') + 1).split('&');
+    return params.sort();
+  }
+
+  function compareUrl(u) {
+    return (url.slice(0, url.indexOf('?')) == u.slice(0, u.indexOf('?')) && getUrlParams(url).join() == getUrlParams(u).join());
+  }
+
   this.data = data;
   this.headers = headers;
 
@@ -1887,7 +1908,7 @@ function MockHttpExpectation(method, url, data, headers, keys) {
     if (!url) return true;
     if (angular.isFunction(url.test)) return url.test(u);
     if (angular.isFunction(url)) return url(u);
-    return url == u;
+    return (url == u || compareUrl(u));
   };
 
   this.matchHeaders = function(h) {
@@ -2254,46 +2275,32 @@ angular.mock.$ComponentControllerProvider = ['$compileProvider', function($compi
  *
  * @installation
  *
- *  <p>First, download the file:</p>
- *  <ul>
-      <li>
-        <a href="https://developers.google.com/speed/libraries/devguide#angularjs">Google CDN</a> e.g.
-        {% code %}"//ajax.googleapis.com/ajax/libs/angularjs/X.Y.Z/"{% endcode %}
-      </li>
-      <li>
-        <a href="https://www.npmjs.com/">NPM</a> e.g.
-        {% code %}npm install {$ doc.packageName $}@X.Y.Z{% endcode %}
-      </li>
-      <li>
-        <a href="http://bower.io">Bower</a><br> e.g.
-        {% code %}bower install {$ doc.packageName $}@X.Y.Z{% endcode %}
-      </li>
-      <li>
-        <a href="https://code.angularjs.org/">code.angularjs.org</a> (discouraged for
-        production use)  e.g.
-        {% code %}"//code.angularjs.org/X.Y.Z/{$ doc.packageFile $}"{% endcode %}
-      </li>
-    </ul>
-    <p>where X.Y.Z is the AngularJS version you are running.</p>
-
-    <p>Then, configure your test runner to load `angular-mocks.js` after `angular.js`.
-    This example uses <a href="http://karma-runner.github.io/">Karma</a>:</p>
-
-    {% code %}
-        config.set({
-          files: [
-            'build/angular.js', // and other module files you need
-            'build/angular-mocks.js',
-            '<path/to/application/files>',
-            '<path/to/spec/files>'
-          ]
-        });
-    {% endcode %}
-
-    <p>Including the `angular-mocks.js` file automatically adds the `ngMock` module, so your tests
-    are ready to go!</p>
+ *  First, download the file:
+ *  * [Google CDN](https://developers.google.com/speed/libraries/devguide#angularjs) e.g.
+ *    `"//ajax.googleapis.com/ajax/libs/angularjs/X.Y.Z/angular-mocks.js"`
+ *  * [NPM](https://www.npmjs.com/) e.g. `npm install angular-mocks@X.Y.Z`
+ *  * [Bower](http://bower.io) e.g. `bower install angular-mocks@X.Y.Z`
+ *  * [code.angularjs.org](https://code.angularjs.org/) (discouraged for production use)  e.g.
+ *    `"//code.angularjs.org/X.Y.Z/angular-mocks.js"`
  *
+ * where X.Y.Z is the AngularJS version you are running.
  *
+ * Then, configure your test runner to load `angular-mocks.js` after `angular.js`.
+ * This example uses <a href="http://karma-runner.github.io/">Karma</a>:
+ *
+ * ```
+ * config.set({
+ *   files: [
+ *     'build/angular.js', // and other module files you need
+ *     'build/angular-mocks.js',
+ *     '<path/to/application/files>',
+ *     '<path/to/spec/files>'
+ *   ]
+ * });
+ * ```
+ *
+ * Including the `angular-mocks.js` file automatically adds the `ngMock` module, so your tests
+ *  are ready to go!
  */
 angular.module('ngMock', ['ng']).provider({
   $browser: angular.mock.$BrowserProvider,
